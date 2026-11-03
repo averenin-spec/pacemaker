@@ -18,6 +18,8 @@
 #include <dirent.h>
 #include <fcntl.h>
 
+#include <glib.h>                   // gboolean, gchar, g_*, FALSE, G*, TRUE
+
 #include <crm/crm.h>
 #include <crm/common/mainloop.h>
 #include <crm/services.h>
@@ -372,7 +374,7 @@ services_action_create_generic(const char *exec, const char *args[])
 
     for (int cur_arg = 1; args[cur_arg - 1] != NULL; cur_arg++) {
 
-        if (cur_arg == PCMK__NELEM(op->opaque->args)) {
+        if (cur_arg == G_N_ELEMENTS(op->opaque->args)) {
             pcmk__info("Cannot prepare action for '%s': Too many arguments",
                        exec);
             services__set_result(op, PCMK_OCF_UNKNOWN_ERROR,
@@ -594,7 +596,7 @@ services_action_free(svc_action_t * op)
     free(op->id);
     free(op->opaque->exec);
 
-    for (i = 0; i < PCMK__NELEM(op->opaque->args); i++) {
+    for (i = 0; i < G_N_ELEMENTS(op->opaque->args); i++) {
         free(op->opaque->args[i]);
     }
 
@@ -649,7 +651,7 @@ gboolean
 services_action_cancel(const char *name, const char *action,
                        unsigned int interval_ms)
 {
-    gboolean cancelled = FALSE;
+    bool cancelled = false;
     char *id = pcmk__op_key(name, action, interval_ms);
     svc_action_t *op = NULL;
 
@@ -674,12 +676,13 @@ services_action_cancel(const char *name, const char *action,
      */
     if (op->pid != 0) {
         pcmk__info("Terminating in-flight op %s[%d] early because it was "
-                   "cancelled",
-                   id, op->pid);
-        cancelled = mainloop_child_kill(op->pid);
-        if (cancelled == FALSE) {
+                   "cancelled", id, op->pid);
+
+        cancelled = pcmk__main_loop_child_kill(op->pid);
+        if (!cancelled) {
             pcmk__err("Termination of %s[%d] failed", id, op->pid);
         }
+
         goto done;
     }
 
@@ -707,12 +710,12 @@ services_action_cancel(const char *name, const char *action,
 
     blocked_ops = g_list_remove(blocked_ops, op);
     services_action_free(op);
-    cancelled = TRUE;
+    cancelled = true;
     // @TODO Initiate handle_blocked_ops() asynchronously
 
 done:
     free(id);
-    return cancelled;
+    return cancelled? TRUE : FALSE;
 }
 
 gboolean

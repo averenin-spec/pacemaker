@@ -23,9 +23,8 @@
 #include <bzlib.h>                  // BZ2_bzBuffToBuffDecompress
 #include <corosync/corotypes.h>     // CS_OK, CS_ERR_QUEUE_FULL
 #include <corosync/cpg.h>           // cpg_address, cpg_name, cpg_fd_get
-#include <glib.h>                   // FALSE, TRUE, g_list_append, gboolean
+#include <glib.h>                   // g_*, gboolean, FALSE, MIN, TRUE
 #include <libxml/tree.h>            // xmlNode
-#include <qb/qbdefs.h>              // QB_MIN
 #include <qb/qbipc_common.h>        // qb_ipc_response_header
 #include <qb/qblog.h>               // QB_XS, LOG_TRACE
 
@@ -145,18 +144,20 @@ pcmk__cpg_local_nodeid(cpg_handle_t handle)
         }
 
         // CPG provider run as root (at least in given user namespace)?
-        rv = crm_ipc_is_authentic_process(fd, (uid_t) 0, (gid_t) 0, &found_pid,
-                                          &found_uid, &found_gid);
+        rv = crm_ipc_is_authentic_process(fd, 0, 0, &found_pid, &found_uid,
+                                          &found_gid);
+
         if (rv == 0) {
             pcmk__err("CPG provider is not authentic: process %lld "
                       "(uid: %lld, gid: %lld)",
                       (long long) PCMK__SPECIAL_PID_AS_0(found_pid),
                       (long long) found_uid, (long long) found_gid);
             goto bail;
+        }
 
-        } else if (rv < 0) {
+        if (rv < 0) {
             pcmk__err("Could not verify authenticity of CPG provider: %s (%d)",
-                      strerror(-rv), -rv);
+                      pcmk_strerror(rv), rv);
             goto bail;
         }
     }
@@ -187,14 +188,14 @@ bail:
  *
  * \param[in] data  CPG handle
  *
- * \return FALSE (to indicate to glib that timer should not be removed)
+ * \return \c G_SOURCE_REMOVE (to destroy the timeout that triggered this call)
  */
 static gboolean
 crm_cs_flush_cb(void *data)
 {
     cs_message_timer = 0;
     crm_cs_flush(data);
-    return FALSE;
+    return G_SOURCE_REMOVE;
 }
 
 // Send no more than this many CPG messages in one flush
@@ -259,7 +260,7 @@ crm_cs_flush(void *data)
         uint32_t delay_ms = 100;
         if (rc != CS_OK) {
             /* Proportionally more if sending failed but cap at 1s */
-            delay_ms = QB_MIN(1000, CS_SEND_MAX + (10 * queue_len));
+            delay_ms = MIN(1000, CS_SEND_MAX + (10 * queue_len));
         }
         cs_message_timer = pcmk__create_timer(delay_ms, crm_cs_flush_cb, data);
     }
@@ -855,17 +856,21 @@ pcmk__cpg_connect(pcmk_cluster_t *cluster)
     }
 
     /* CPG provider run as root (in given user namespace, anyway)? */
-    if (!(rv = crm_ipc_is_authentic_process(fd, (uid_t) 0,(gid_t) 0, &found_pid,
-                                            &found_uid, &found_gid))) {
+    rv = crm_ipc_is_authentic_process(fd, 0, 0, &found_pid, &found_uid,
+                                      &found_gid);
+
+    if (rv == 0) {
         pcmk__err("CPG provider is not authentic: process %lld "
                   "(uid: %lld, gid: %lld)",
                   (long long) PCMK__SPECIAL_PID_AS_0(found_pid),
                   (long long) found_uid, (long long) found_gid);
         rc = CS_ERR_ACCESS;
         goto bail;
-    } else if (rv < 0) {
+    }
+
+    if (rv < 0) {
         pcmk__err("Could not verify authenticity of CPG provider: %s (%d)",
-                  strerror(-rv), -rv);
+                  pcmk_strerror(rv), rv);
         rc = CS_ERR_ACCESS;
         goto bail;
     }

@@ -29,7 +29,7 @@
 #include <unistd.h>                 // close, read, write
 
 #include <bzlib.h>                  // BZ2_bzBuffToBuffDecompress
-#include <glib.h>                   // GUINT32_SWAP_LE_BE, g_string_*
+#include <glib.h>                   // gboolean, g_*, FALSE, G*, TRUE
 #include <gnutls/gnutls.h>          // gnutls_strerror, GNUTLS_E_AGAIN
 #include <libxml/tree.h>            // xmlNode
 #include <qb/qblog.h>               // QB_XS
@@ -785,7 +785,9 @@ struct tcp_async_cb_data {
     void (*callback) (void *userdata, int rc, int sock);
 };
 
-// \return TRUE if timer should be rescheduled, FALSE otherwise
+/* \return G_SOURCE_CONTINUE if timer should be rescheduled, G_SOURCE_REMOVED
+ *         otherwise
+ */
 static gboolean
 check_connect_finished(void *userdata)
 {
@@ -811,7 +813,7 @@ check_connect_finished(void *userdata)
         rc = errno;
         if ((rc == EINTR) || (rc == EAGAIN)) {
             if ((time(NULL) - cb_data->start) < pcmk__timeout_ms2s(cb_data->timeout_ms)) {
-                return TRUE; // There is time left, so reschedule timer
+                return G_SOURCE_CONTINUE; // There is time left, so reschedule timer
             } else {
                 rc = ETIMEDOUT;
             }
@@ -821,7 +823,7 @@ check_connect_finished(void *userdata)
 
     } else if (rc == 0) { // select() timeout
         if ((time(NULL) - cb_data->start) < pcmk__timeout_ms2s(cb_data->timeout_ms)) {
-            return TRUE; // There is time left, so reschedule timer
+            return G_SOURCE_CONTINUE; // There is time left, so reschedule timer
         }
         pcmk__debug("Timed out while waiting for socket %d connection success",
                     cb_data->sock);
@@ -868,7 +870,7 @@ check_connect_finished(void *userdata)
         cb_data->callback(cb_data->userdata, rc, cb_data->sock);
     }
     free(cb_data);
-    return FALSE; // Do not reschedule timer
+    return G_SOURCE_REMOVE; // Do not reschedule timer
 }
 
 /*!
@@ -1073,7 +1075,7 @@ pcmk__connect_remote(const char *host, int port, int timeout, int *timer_id,
             ((struct sockaddr_in *)(void*)addr)->sin_port = htons(port);
         }
 
-        memset(buffer, 0, PCMK__NELEM(buffer));
+        memset(buffer, 0, G_N_ELEMENTS(buffer));
         pcmk__sockaddr2str(addr, buffer);
         pcmk__info("Attempting remote connection to %s:%d", buffer, port);
 

@@ -22,7 +22,7 @@
 #include <time.h>                       // time, time_t
 #include <unistd.h>                     // execlp, fork, setgid, setsid
 
-#include <glib.h>                       // gboolean, G_SOURCE_CONTINUE
+#include <glib.h>                       // gboolean, G_*
 #include <qb/qblog.h>                   // QB_XS
 
 #include <crm_config.h>                 // SUPPORT_COROSYNC, CRM_DAEMON_*
@@ -102,7 +102,7 @@ static bool fatal_error = false;
 static int child_liveness(pcmkd_child_t *child);
 static gboolean escalate_shutdown(void *data);
 static int start_child(pcmkd_child_t *child);
-static void pcmk_child_exit(mainloop_child_t *p, int core, int signo,
+static void pcmk_child_exit(pcmk__main_loop_child_t *p, int core, int signo,
                             int exitcode);
 static void pcmk_process_exit(pcmkd_child_t *child);
 static void stop_child(pcmkd_child_t *child, int signal);
@@ -110,7 +110,7 @@ static void stop_child(pcmkd_child_t *child, int signal);
 static void
 for_each_child(void (*fn)(pcmkd_child_t *child))
 {
-    for (int i = 0; i < PCMK__NELEM(pcmk_children); i++) {
+    for (int i = 0; i < G_N_ELEMENTS(pcmk_children); i++) {
         fn(&pcmk_children[i]);
     }
 }
@@ -225,7 +225,7 @@ check_next_subdaemon(void *user_data)
             return G_SOURCE_REMOVE;
     }
 
-    if (++next_child >= PCMK__NELEM(pcmk_children)) {
+    if (++next_child >= G_N_ELEMENTS(pcmk_children)) {
         next_child = 0;
     }
 
@@ -251,30 +251,28 @@ escalate_shutdown(void *data)
 }
 
 static void
-pcmk_child_exit(mainloop_child_t *p, int core, int signo, int exitcode)
+pcmk_child_exit(pcmk__main_loop_child_t *p, int core, int signo, int exitcode)
 {
-    pcmkd_child_t *child = mainloop_child_userdata(p);
-    const char *name = mainloop_child_name(p);
+    pcmkd_child_t *child = p->user_data;
 
     if (signo) {
         // cts-lab looks for this message
         do_crm_log(((signo == SIGKILL)? LOG_WARNING : LOG_ERR),
-                   "%s[%d] terminated with signal %d (%s)%s",
-                   name, p->pid, signo, strsignal(signo),
-                   (core? " and dumped core" : ""));
+                   "%s[%d] terminated with signal %d (%s)%s", p->desc, p->pid,
+                   signo, strsignal(signo), (core? " and dumped core" : ""));
         pcmk_process_exit(child);
         return;
     }
 
     switch(exitcode) {
         case CRM_EX_OK:
-            pcmk__info("%s[%d] exited with status %d (%s)", name, p->pid,
+            pcmk__info("%s[%d] exited with status %d (%s)", p->desc, p->pid,
                        exitcode, crm_exit_str(exitcode));
             break;
 
         case CRM_EX_FATAL:
             pcmk__warn("Shutting cluster down because %s[%d] had fatal failure",
-                       name, p->pid);
+                       p->desc, p->pid);
             child->flags &= ~child_respawn;
             fatal_error = true;
             pcmk_shutdown(SIGTERM);
@@ -287,7 +285,7 @@ pcmk_child_exit(mainloop_child_t *p, int core, int signo, int exitcode)
                 child->flags &= ~child_respawn;
                 fatal_error = true;
                 msg = pcmk__assert_asprintf("Subdaemon %s[%d] requested panic",
-                                            name, p->pid);
+                                            p->desc, p->pid);
                 pcmk__panic(msg);
 
                 // Should never get here
@@ -298,7 +296,7 @@ pcmk_child_exit(mainloop_child_t *p, int core, int signo, int exitcode)
 
         default:
             // cts-lab looks for this message
-            pcmk__err("%s[%d] exited with status %d (%s)", name, p->pid,
+            pcmk__err("%s[%d] exited with status %d (%s)", p->desc, p->pid,
                       exitcode, crm_exit_str(exitcode));
             break;
     }
@@ -349,10 +347,10 @@ pcmk_process_exit(pcmkd_child_t * child)
 static gboolean
 pcmk_shutdown_worker(void *user_data)
 {
-    static int phase = PCMK__NELEM(pcmk_children) - 1;
+    static int phase = G_N_ELEMENTS(pcmk_children) - 1;
     static time_t next_log = 0;
 
-    if (phase == PCMK__NELEM(pcmk_children) - 1) {
+    if (phase == G_N_ELEMENTS(pcmk_children) - 1) {
         pcmk__notice("Shutting down Pacemaker");
         pacemakerd_state = PCMK__VALUE_SHUTTING_DOWN;
     }
@@ -480,7 +478,8 @@ start_child(pcmkd_child_t * child)
             valgrind_s = " (valgrind enabled: " PCMK__VALGRIND_EXEC ")";
         }
 
-        mainloop_child_add(child->pid, 0, name, child, pcmk_child_exit);
+        pcmk__main_loop_child_create(child->pid, name, 0, child, true,
+                                     pcmk_child_exit);
 
         pcmk__info("Forked process %lld using user %lld (%s) and group %lld "
                    "for subdaemon %s%s",
@@ -799,7 +798,7 @@ find_and_track_existing_processes(void)
     for (rounds = 1; rounds <= WAIT_TRIES; rounds++) {
         wait_in_progress = false;
 
-        for (i = 0; i < PCMK__NELEM(pcmk_children); i++) {
+        for (i = 0; i < G_N_ELEMENTS(pcmk_children); i++) {
             int rc = find_and_track_child(&pcmk_children[i], rounds,
                                           &wait_in_progress);
 

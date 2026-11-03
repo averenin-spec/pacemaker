@@ -13,7 +13,7 @@
 
 #include <crm/fencing/internal.h>
 
-#include <glib.h>
+#include <glib.h>                       // g_*, G*, MIN
 #include <libxml/tree.h>                // xmlNode
 
 // Check whether we have a high-resolution monotonic clock
@@ -387,7 +387,7 @@ stonith_recurring_op_helper(void *data)
     cmd->stonith_recurring_id = 0;
 
     if (!cmd->rsc_id) {
-        return FALSE;
+        return G_SOURCE_REMOVE;
     }
 
     rsc = g_hash_table_lookup(rsc_list, cmd->rsc_id);
@@ -402,7 +402,7 @@ stonith_recurring_op_helper(void *data)
 #endif
     mainloop_set_trigger(rsc->work);
 
-    return FALSE;
+    return G_SOURCE_REMOVE;
 }
 
 static inline void
@@ -430,7 +430,7 @@ start_delay_helper(void *data)
         mainloop_set_trigger(rsc->work);
     }
 
-    return FALSE;
+    return G_SOURCE_REMOVE;
 }
 
 /*!
@@ -968,7 +968,8 @@ action_complete(svc_action_t * action)
         delay = timeout_left/2;
     }
 
-    delay = QB_MIN(2000, delay);
+    delay = MIN(2000, delay);
+
     if (delay < timeout_left) {
         cmd->start_delay = delay;
         cmd->timeout = timeout_left;

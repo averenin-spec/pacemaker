@@ -195,13 +195,13 @@ lrmd_auth_timeout_cb(void *data)
     client->remote->auth_timeout = 0;
 
     if (pcmk__is_set(client->flags, pcmk__client_tls_handshake_complete)) {
-        return FALSE;
+        return G_SOURCE_REMOVE;
     }
 
     g_clear_pointer(&client->remote->source, mainloop_del_fd);
     pcmk__err("Remote client authentication timed out");
 
-    return FALSE;
+    return G_SOURCE_REMOVE;
 }
 
 // Dispatch callback for remote server socket
@@ -230,7 +230,7 @@ lrmd_remote_listen(void *data)
         return TRUE;
     }
 
-    new_client = pcmk__new_unauth_client(NULL);
+    new_client = pcmk__new_unauth_client();
     new_client->remote = pcmk__assert_alloc(1, sizeof(pcmk__remote_t));
     pcmk__set_client_flags(new_client, pcmk__client_tls);
     new_client->remote->tls_session = session;

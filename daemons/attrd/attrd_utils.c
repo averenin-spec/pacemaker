@@ -12,9 +12,10 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <errno.h>
-#include <glib.h>
 #include <regex.h>
 #include <sys/types.h>
+
+#include <glib.h>                   // g_*, CLAMP, G*
 
 #include <crm/crm.h>
 #include <crm/common/mainloop.h>
@@ -75,10 +76,8 @@ attrd_expand_value(const char *value, const char *old_value)
         increment = 0; // Invalid increment
     }
 
-    if (increment < 0) {
-        return QB_MAX(score + increment, -PCMK_SCORE_INFINITY);
-    }
-    return QB_MIN(score + increment, PCMK_SCORE_INFINITY);
+    score += increment;
+    return CLAMP(score, -PCMK_SCORE_INFINITY, PCMK_SCORE_INFINITY);
 }
 
 /*!
@@ -141,7 +140,7 @@ attrd_free_attribute(void *data)
         free(a->set_type);
         free(a->user);
 
-        mainloop_timer_del(a->timer);
+        pcmk__main_loop_timer_free(a->timer);
         g_hash_table_destroy(a->values);
 
         free(a);
