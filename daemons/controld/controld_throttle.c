@@ -16,6 +16,8 @@
 #include <ctype.h>
 #include <dirent.h>
 
+#include <glib.h>                   // gboolean, g_*, G*, MAX
+
 #include <crm/crm.h>
 #include <crm/common/xml.h>
 #include <crm/cluster.h>
@@ -47,7 +49,7 @@ static float throttle_load_target = 0.0;
 #define THROTTLE_FACTOR_HIGH   2.0
 
 static GHashTable *throttle_records = NULL;
-static mainloop_timer_t *throttle_timer = NULL;
+static pcmk__main_loop_timer_t *throttle_timer = NULL;
 
 static const char *
 load2str(enum throttle_state_e mode)
@@ -202,7 +204,7 @@ static gboolean
 throttle_timer_cb(void *data)
 {
     throttle_send_command(throttle_mode());
-    return TRUE;
+    return G_SOURCE_CONTINUE;
 }
 
 static void
@@ -262,11 +264,12 @@ throttle_init(void)
 {
     if(throttle_records == NULL) {
         throttle_records = pcmk__strkey_table(NULL, throttle_record_free);
-        throttle_timer = mainloop_timer_add("throttle", 30 * 1000, TRUE, throttle_timer_cb, NULL);
+        throttle_timer = pcmk__main_loop_timer_new("throttle", (30 * 1000),
+                                                   throttle_timer_cb, NULL);
     }
 
     throttle_update_job_max(NULL);
-    mainloop_timer_start(throttle_timer);
+    pcmk__main_loop_timer_start(throttle_timer);
 }
 
 /*!
@@ -291,7 +294,7 @@ controld_configure_throttle(GHashTable *options)
 void
 throttle_fini(void)
 {
-    g_clear_pointer(&throttle_timer, mainloop_timer_del);
+    g_clear_pointer(&throttle_timer, pcmk__main_loop_timer_free);
     g_clear_pointer(&throttle_records, g_hash_table_destroy);
 }
 
@@ -311,13 +314,13 @@ throttle_get_total_job_limit(int l)
 
             case throttle_extreme:
                 if(limit == 0 || limit > peers/4) {
-                    limit = QB_MAX(1, peers/4);
+                    limit = MAX(1, peers/4);
                 }
                 break;
 
             case throttle_high:
                 if(limit == 0 || limit > peers/2) {
-                    limit = QB_MAX(1, peers/2);
+                    limit = MAX(1, peers/2);
                 }
                 break;
             default:
@@ -359,13 +362,13 @@ throttle_get_job_limit(const char *node)
             jobs = 1; /* At least one job must always be allowed */
             break;
         case throttle_med:
-            jobs = QB_MAX(1, r->max / 4);
+            jobs = MAX(1, r->max / 4);
             break;
         case throttle_low:
-            jobs = QB_MAX(1, r->max / 2);
+            jobs = MAX(1, r->max / 2);
             break;
         case throttle_none:
-            jobs = QB_MAX(1, r->max);
+            jobs = MAX(1, r->max);
             break;
         default:
             pcmk__err("Unknown throttle mode %.4x on %s", r->mode, node);

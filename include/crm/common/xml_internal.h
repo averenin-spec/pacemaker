@@ -23,6 +23,8 @@
 #include <stdint.h>   // uint32_t
 #include <stdio.h>
 
+#include <glib.h>                               // MIN
+
 #include <crm/crm.h>  /* transitively imports qblog.h */
 #include <crm/common/output_internal.h>
 #include <crm/common/xml_names.h>             // PCMK_XA_ID, PCMK_XE_CLONE
@@ -104,22 +106,18 @@ do {                                                                            
         if (CXLB_len <= 0 || CXLB_buf[CXLB_len - 1] == '\n' || !(dechunk)) {    \
             if (CXLB_len < 0) {                                                 \
                 CXLB_buf = (char *) "LOG CORRUPTION HAZARD"; /*we don't modify*/\
-                CXLB_priority = QB_MIN(CXLB_priority, LOG_ERR);                 \
+                CXLB_priority = MIN(CXLB_priority, LOG_ERR);                    \
             } else if (CXLB_len > 0 /* && (dechunk) */                          \
                        && CXLB_buf[CXLB_len - 1] == '\n') {                     \
                 CXLB_buf[CXLB_len - 1] = '\0';                                  \
             }                                                                   \
             if (CXLB_buffer) {                                                  \
-                qb_log_from_external_source(__func__, __FILE__, "%s%s%s",       \
-                                            CXLB_priority, __LINE__, 0,         \
-                                            (prefix) != NULL ? (prefix) : "",   \
-                                            CXLB_buffer, CXLB_buf);             \
+                qb_log(CXLB_priority, "%s%s%s", pcmk__s(prefix, ""),            \
+                       CXLB_buffer, CXLB_buf);                                  \
                 free(CXLB_buffer);                                              \
+                                                                                \
             } else {                                                            \
-                qb_log_from_external_source(__func__, __FILE__, "%s%s",         \
-                                            (priority), __LINE__, 0,            \
-                                            (prefix) != NULL ? (prefix) : "",   \
-                                            CXLB_buf);                          \
+                qb_log(priority, "%s%s", pcmk__s(prefix, ""), CXLB_buf);        \
             }                                                                   \
             if (CXLB_len < 0) {                                                 \
                 CXLB_buf = NULL;  /* restore temporary override */              \
@@ -139,7 +137,7 @@ do {                                                                            
             memcpy(CXLB_buffer + CXLB_buffer_len, CXLB_buf, CXLB_len);          \
             CXLB_buffer_len += CXLB_len;                                        \
             CXLB_buffer[CXLB_buffer_len] = '\0';                                \
-            CXLB_priority = QB_MIN(CXLB_priority, (priority));  /* severest? */ \
+            CXLB_priority = MIN(CXLB_priority, (priority));  /* severest? */    \
         }                                                                       \
         free(CXLB_buf);                                                         \
     }                                                                           \

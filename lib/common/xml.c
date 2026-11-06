@@ -18,7 +18,7 @@
 #include <sys/stat.h>                   // stat(), S_ISREG, etc.
 #include <sys/types.h>
 
-#include <glib.h>                       // gboolean, GString
+#include <glib.h>                       // gchar, g_*, FALSE, G*, TRUE
 #include <libxml/tree.h>                // xmlNode, etc.
 #include <libxml/xmlstring.h>           // xmlChar, xmlGetUTF8Char()
 
@@ -865,10 +865,8 @@ pcmk__xml_free_position(xmlNode *node, int position)
             {
                 GString *xpath = pcmk__element_xpath(node);
 
-                qb_log_from_external_source(__func__, __FILE__,
-                                            "Cannot remove %s %x", LOG_TRACE,
-                                            __LINE__, 0, xpath->str,
-                                            nodepriv->flags);
+                qb_log(LOG_TRACE, "Cannot remove %s %x", xpath->str,
+                       nodepriv->flags);
                 g_string_free(xpath, TRUE);
             },
             {}
@@ -1206,7 +1204,7 @@ pcmk__xml_escape(const char *text, enum pcmk__xml_escape_type type)
     append_xml_escaped_fn_t append_char_fn = NULL;
     GString *copy = NULL;
 
-    pcmk__assert((type >= 0) && (type < PCMK__NELEM(append_xml_escaped_fns)));
+    pcmk__assert((type >= 0) && (type < G_N_ELEMENTS(append_xml_escaped_fns)));
 
     append_char_fn = append_xml_escaped_fns[type];
     pcmk__assert(append_char_fn != NULL);

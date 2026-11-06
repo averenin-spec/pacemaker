@@ -34,7 +34,7 @@
 #include "pcmkd_corosync.h"
 
 static corosync_cfg_handle_t cfg_handle = 0;
-static mainloop_timer_t *reconnect_timer = NULL;
+static pcmk__main_loop_timer_t *reconnect_timer = NULL;
 
 /* =::=::=::= CFG - Shutdown stuff =::=::=::= */
 
@@ -95,24 +95,21 @@ close_cfg(void)
 static gboolean
 cluster_reconnect_cb(void *data)
 {
-    if (cluster_connect_cfg()) {
-        g_clear_pointer(&reconnect_timer, mainloop_timer_del);
-        pcmk__notice("Cluster reconnect succeeded");
-        pcmkd_read_config();
-        restart_cluster_subdaemons();
-        return G_SOURCE_REMOVE;
+    if (!pacemakerd_corosync_connect_cfg()) {
+        /* In theory this will continue forever. In practice the CIB connection
+         * from attrd will time out and shut down Pacemaker when it gets bored.
+         */
+        pcmk__info("Cluster reconnect failed (connection will be reattempted "
+                   "once per second)");
+        return G_SOURCE_CONTINUE;
     }
 
-    pcmk__info("Cluster reconnect failed (connection will be reattempted "
-               "once per second)");
-
-    /*
-     * In theory this will continue forever. In practice the CIB connection from
-     * attrd will timeout and shut down Pacemaker when it gets bored.
-     */
-    return G_SOURCE_CONTINUE;
+    g_clear_pointer(&reconnect_timer, pcmk__main_loop_timer_free);
+    pcmk__notice("Cluster reconnect succeeded");
+    pacemakerd_corosync_read_config();
+    restart_cluster_subdaemons();
+    return G_SOURCE_REMOVE;
 }
-
 
 static void
 cfg_connection_destroy(void *user_data)
@@ -121,8 +118,10 @@ cfg_connection_destroy(void *user_data)
                "reattempted once per second)");
     corosync_cfg_finalize(cfg_handle);
     cfg_handle = 0;
-    reconnect_timer = mainloop_timer_add("corosync reconnect", 1000, TRUE, cluster_reconnect_cb, NULL);
-    mainloop_timer_start(reconnect_timer);
+    reconnect_timer = pcmk__main_loop_timer_new("pcmkd_corosync_reconnect",
+                                                1000, cluster_reconnect_cb,
+                                                NULL);
+    pcmk__main_loop_timer_start(reconnect_timer);
 }
 
 void
@@ -133,7 +132,7 @@ cluster_disconnect_cfg(void)
     /* The mainloop should be gone by this point, so this isn't necessary, but
      * cleaning up memory should make valgrind happier.
      */
-    g_clear_pointer(&reconnect_timer, mainloop_timer_del);
+    g_clear_pointer(&reconnect_timer, pcmk__main_loop_timer_free);
 }
 
 #define cs_repeat(counter, max, code) do {		\
@@ -147,15 +146,17 @@ cluster_disconnect_cfg(void)
 	}						\
     } while(counter < max)
 
-gboolean
-cluster_connect_cfg(void)
+bool
+pacemakerd_corosync_connect_cfg(void)
 {
-    cs_error_t rc;
-    int fd = -1, retries = 0, rv;
+    cs_error_t rc = CS_OK;
+    int fd = -1;
+    int retries = 0;
+    int rv = 0;
     uid_t found_uid = 0;
     gid_t found_gid = 0;
     pid_t found_pid = 0;
-    uint32_t nodeid;
+    uint32_t nodeid = 0;
 
     static struct mainloop_fd_callbacks cfg_fd_callbacks = {
         .dispatch = pcmk_cfg_dispatch,
@@ -167,7 +168,7 @@ cluster_connect_cfg(void)
     if (rc != CS_OK) {
         pcmk__crit("Could not connect to Corosync CFG: %s " QB_XS " rc=%d",
                    pcmk_rc_str(pcmk__corosync2rc(rc)), rc);
-        return FALSE;
+        return false;
     }
 
     rc = corosync_cfg_fd_get(cfg_handle, &fd);
@@ -178,16 +179,20 @@ cluster_connect_cfg(void)
     }
 
     /* CFG provider run as root (in given user namespace, anyway)? */
-    if (!(rv = crm_ipc_is_authentic_process(fd, (uid_t) 0,(gid_t) 0, &found_pid,
-                                            &found_uid, &found_gid))) {
+    rv = crm_ipc_is_authentic_process(fd, 0, 0, &found_pid, &found_uid,
+                                      &found_gid);
+
+    if (rv == 0) {
         pcmk__crit("Rejecting Corosync CFG provider because process %lld "
                    "is running as uid %lld gid %lld, not root",
                    (long long) PCMK__SPECIAL_PID_AS_0(found_pid),
                    (long long) found_uid, (long long) found_gid);
         goto bail;
-    } else if (rv < 0) {
+    }
+
+    if (rv < 0) {
         pcmk__crit("Could not authenticate Corosync CFG provider: %s "
-                   QB_XS " rc=%d", strerror(-rv), -rv);
+                   QB_XS " rc=%d", pcmk_strerror(rv), rv);
         goto bail;
     }
 
@@ -212,11 +217,11 @@ cluster_connect_cfg(void)
 #endif
 
     mainloop_add_fd("corosync-cfg", G_PRIORITY_DEFAULT, fd, &cfg_handle, &cfg_fd_callbacks);
-    return TRUE;
+    return true;
 
   bail:
     corosync_cfg_finalize(cfg_handle);
-    return FALSE;
+    return false;
 }
 
 void
@@ -277,17 +282,17 @@ get_config_opt(uint64_t unused, cmap_handle_t object_handle, const char *key, ch
 }
 
 bool
-pcmkd_read_config(void)
+pacemakerd_corosync_read_config(void)
 {
     cs_error_t cs_rc = CS_OK;
     int retries = 0;
-    cmap_handle_t local_handle;
+    cmap_handle_t local_handle = 0;
     uint64_t config = 0;
     int fd = -1;
     uid_t found_uid = 0;
     gid_t found_gid = 0;
     pid_t found_pid = 0;
-    int rv;
+    int rv = 0;
     bool success = false;
     enum pcmk_cluster_layer cluster_layer = pcmk_cluster_layer_unknown;
     const char *cluster_layer_s = NULL;
@@ -320,8 +325,9 @@ pcmkd_read_config(void)
     }
 
     /* CMAP provider run as root (in given user namespace, anyway)? */
-    rv = crm_ipc_is_authentic_process(fd, (uid_t) 0,(gid_t) 0, &found_pid,
-                                      &found_uid, &found_gid);
+    rv = crm_ipc_is_authentic_process(fd, 0, 0, &found_pid, &found_uid,
+                                      &found_gid);
+
     if (rv == 0) {
         pcmk__crit("Rejecting Corosync CMAP provider because process %lld "
                    "is running as uid %lld gid %lld, not root",
@@ -332,7 +338,7 @@ pcmkd_read_config(void)
 
     if (rv < 0) {
         pcmk__crit("Could not authenticate Corosync CMAP provider: %s "
-                   QB_XS " rc=%d", strerror(-rv), -rv);
+                   QB_XS " rc=%d", pcmk_strerror(rv), rv);
         goto done;
     }
 

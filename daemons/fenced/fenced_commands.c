@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <ctype.h>
 
+#include <glib.h>                       // g_*, G*, MIN
 #include <libxml/tree.h>                // xmlNode
 #include <libxml/xpath.h>               // xmlXPathObject, etc.
 
@@ -400,10 +401,10 @@ get_action_timeout(const fenced_device_t *device, const char *action,
         return default_timeout;
     }
 
-    timeout_ms = QB_MIN(timeout_ms, UINT_MAX);
+    timeout_ms = MIN(timeout_ms, UINT_MAX);
     timeout_sec = pcmk__timeout_ms2s((unsigned int) timeout_ms);
 
-    return QB_MIN(timeout_sec, INT_MAX);
+    return MIN(timeout_sec, INT_MAX);
 }
 
 /*!
@@ -628,8 +629,11 @@ static int
 get_agent_metadata_cb(void *data)
 {
     fenced_device_t *device = data;
-    unsigned int period_ms = 0;
-    int rc = get_agent_metadata(device->agent, &device->agent_metadata);
+    int rc = pcmk_rc_ok;
+
+    pcmk__assert(device->timer != NULL);
+
+    rc = get_agent_metadata(device->agent, &device->agent_metadata);
 
     if (rc == pcmk_rc_ok) {
         if (device->agent_metadata != NULL) {
@@ -642,11 +646,14 @@ get_agent_metadata_cb(void *data)
     }
 
     if (rc == EAGAIN) {
-        period_ms = pcmk__mainloop_timer_get_period(device->timer);
-        if (period_ms < 160 * 1000) {
-            mainloop_timer_set_period(device->timer, 2 * period_ms);
+        if (device->timer->interval_ms < (160 * 1000)) {
+            device->timer->interval_ms *= 2;
         }
 
+        /* @FIXME Does the updated interval even take effect? G_SOURCE_CONTINUE
+         * tells main_loop_timer_cb() to keep the existing GSource. It seems as
+         * if that GSource would still use the old interval.
+         */
         return G_SOURCE_CONTINUE;
     }
 
@@ -809,7 +816,7 @@ start_delay_helper(void *data)
         mainloop_set_trigger(device->work);
     }
 
-    return FALSE;
+    return G_SOURCE_REMOVE;
 }
 
 static void
@@ -907,10 +914,7 @@ free_device(void *data)
 
     g_list_free_full(device->targets, free);
 
-    if (device->timer != NULL) {
-        mainloop_timer_stop(device->timer);
-        mainloop_timer_del(device->timer);
-    }
+    pcmk__main_loop_timer_free(device->timer);
 
     mainloop_destroy_trigger(device->work);
 
@@ -1192,13 +1196,14 @@ build_device_from_xml(const xmlNode *dev)
 
     } else if (rc == EAGAIN) {
         if (device->timer == NULL) {
-            device->timer = mainloop_timer_add("get_agent_metadata", 10 * 1000,
-                                               TRUE, get_agent_metadata_cb,
-                                               device);
+            device->timer = pcmk__main_loop_timer_new("get_agent_metadata",
+                                                      (10 * 1000),
+                                                      get_agent_metadata_cb,
+                                                      device);
         }
 
-        if (!mainloop_timer_running(device->timer)) {
-            mainloop_timer_start(device->timer);
+        if (!pcmk__main_loop_timer_running(device->timer)) {
+            pcmk__main_loop_timer_start(device->timer);
         }
     }
 
@@ -3055,7 +3060,7 @@ fenced_construct_reply(const xmlNode *request, xmlNode *data,
             PCMK__XA_ST_CALLOPT,
         };
 
-        for (int lpc = 0; lpc < PCMK__NELEM(names); lpc++) {
+        for (int lpc = 0; lpc < G_N_ELEMENTS(names); lpc++) {
             name = names[lpc];
             value = pcmk__xe_get(request, name);
             pcmk__xe_set(reply, name, value);

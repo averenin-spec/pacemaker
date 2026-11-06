@@ -12,7 +12,7 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include <glib.h>
+#include <glib.h>               // g_*, GHashTable*, MIN
 
 #include <crm/common/logging.h>
 #include <crm/common/results.h>
@@ -29,6 +29,8 @@ attrd_create_attribute(xmlNode *xml)
     const char *set_type = pcmk__xe_get(xml, PCMK__XA_ATTR_SET_TYPE);
     const char *dampen_s = pcmk__xe_get(xml, PCMK__XA_ATTR_DAMPENING);
     attribute_t *a = NULL;
+
+    pcmk__assert(name != NULL);
 
     if (set_type == NULL) {
         set_type = PCMK_XE_INSTANCE_ATTRIBUTES;
@@ -64,7 +66,7 @@ attrd_create_attribute(xmlNode *xml)
                        a->id);
 
         } else if (dampen > 0) {
-            a->timeout_ms = (int) QB_MIN(dampen, INT_MAX);
+            a->timeout_ms = (int) MIN(dampen, INT_MAX);
             a->timer = attrd_add_timer(a->id, a->timeout_ms, a);
         }
     }
@@ -97,8 +99,9 @@ attrd_update_dampening(attribute_t *a, xmlNode *xml, const char *attr)
     }
 
     if (a->timeout_ms != dampen) {
-        mainloop_timer_del(a->timer);
-        a->timeout_ms = (int) QB_MIN(dampen, INT_MAX);
+        pcmk__main_loop_timer_free(a->timer);
+        a->timeout_ms = (int) MIN(dampen, INT_MAX);
+
         if (dampen > 0) {
             a->timer = attrd_add_timer(attr, a->timeout_ms, a);
             pcmk__info("Update attribute %s delay to %dms (%s)",
