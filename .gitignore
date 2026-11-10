@@ -351,3 +351,8 @@ pacemaker_*.info
 /xml/version-diff.sh
 ylwrap
 pacemaker.sysusers_*
+
+.vscode
+compile_commands.json
+test_data/*
+scheduler-notes/*
